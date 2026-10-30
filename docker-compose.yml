@@ -1,0 +1,30 @@
+services:
+  logsman:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8010:8010"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mongo:
+    # Docker Hub pulls can fail behind Docker Desktop's internal proxy. Google's
+    # pull-through mirror serves the same official library/mongo image.
+    image: mirror.gcr.io/library/mongo:8
+    volumes:
+      - logsman-mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  logsman-mongo:

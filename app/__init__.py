@@ -1,0 +1,1 @@
+"""Logsman application package."""
