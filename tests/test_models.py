@@ -1,7 +1,9 @@
+"""The strict log payload contract."""
+
 import pytest
 from pydantic import ValidationError
 
-from app.models import EventModel
+from logsman.events.schema import EventModel
 
 
 def test_event_model_accepts_contract():

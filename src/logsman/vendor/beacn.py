@@ -78,8 +78,19 @@ class BeacnError(Exception):
 
 
 class APIError(BeacnError):
+    """The server answered with an error.
+
+    Attributes:
+        message: The server's error message (or ``HTTP <status>``).
+        status: HTTP status code, when there was a response.
+        code: BEACN error code such as ``invalid``, ``forbidden``, ``rate_limited``.
+        details: Extra structured information from the server, if any.
+        request_id: The ``X-Request-Id`` of the failed request, for support.
+    """
+
     def __init__(self, message, *, status=None, code=None, details=None, request_id=None):
         # type: (str, Optional[int], Optional[str], Any, Optional[str]) -> None
+        """Store the message and the response details."""
         super().__init__(message)
         self.message = message
         self.status = status
@@ -88,6 +99,7 @@ class APIError(BeacnError):
         self.request_id = request_id
 
     def __str__(self):  # type: () -> str
+        """``[status] message (request_id=…)``, omitting the parts that are unknown."""
         base = self.message
         if self.status:
             base = "[%s] %s" % (self.status, base)
@@ -97,30 +109,46 @@ class APIError(BeacnError):
 
 
 class AuthError(APIError):
+    """401/403: the API key is missing, invalid, revoked, or lacks a scope."""
+
     pass
 
 
 class NotFound(APIError):
+    """404: the event, task or other resource does not exist in this environment."""
+
     pass
 
 
 class ValidationError(APIError):
+    """422: the event or request was rejected as malformed."""
+
     pass
 
 
 class RateLimitError(APIError):
+    """429: the key exceeded its ingestion rate.
+
+    Attributes:
+        retry_after: Seconds to wait, from the ``Retry-After`` header.
+    """
+
     def __init__(self, message, *, retry_after=1.0, **kw):
         # type: (str, float, Any) -> None
+        """Store ``retry_after`` along with the usual error details."""
         super().__init__(message, **kw)
         self.retry_after = retry_after
 
 
 class ConnectionClosed(BeacnError):
+    """A realtime stream ended and could not be resumed."""
+
     pass
 
 
 def _error_for(status, payload, request_id):
     # type: (int, Any, Optional[str]) -> APIError
+    """Build the right :class:`APIError` subclass for an HTTP error response."""
     err = {}
     if isinstance(payload, dict):
         err = payload.get("error") or payload
@@ -168,6 +196,16 @@ class RetryPolicy(object):
         jitter=True,
     ):
         # type: (int, float, float, float, float, bool) -> None
+        """Configure retries.
+
+        Args:
+            max_attempts: Total attempts including the first (at least 1).
+            base_delay: Delay before the first retry, in seconds.
+            max_delay: Upper bound on any single delay.
+            max_elapsed: Stop retrying once this many seconds have passed overall.
+            multiplier: Exponential backoff factor between attempts.
+            jitter: Randomise each delay ("full jitter") to avoid thundering herds.
+        """
         self.max_attempts = max(1, max_attempts)
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -177,6 +215,11 @@ class RetryPolicy(object):
 
     def delay_for(self, attempt, retry_after=None):
         # type: (int, Optional[float]) -> float
+        """Seconds to wait before attempt ``attempt + 1``.
+
+        A server ``Retry-After`` value wins (capped at ``max_delay``); otherwise
+        exponential backoff with optional jitter.
+        """
         if retry_after is not None:
             return min(self.max_delay, max(0.0, retry_after))
         raw = self.base_delay * (self.multiplier ** (attempt - 1))
@@ -187,6 +230,12 @@ class RetryPolicy(object):
 
     def should_retry(self, attempt, status, exc, idempotent):
         # type: (int, Optional[int], Optional[BaseException], bool) -> bool
+        """Whether to retry after attempt number ``attempt``.
+
+        Only idempotent requests are retried (publishes carry idempotency keys, so
+        they count). Network errors, 429 and 5xx responses are retried; other 4xx
+        responses are not.
+        """
         if attempt >= self.max_attempts or not idempotent:
             return False
         if exc is not None:
@@ -209,6 +258,7 @@ class Event(object):
 
     def __init__(self, payload):
         # type: (Dict[str, Any]) -> None
+        """Wrap an event dict from the API or a realtime stream."""
         self.raw = payload
         self.id = payload.get("id")
         self.event = payload.get("event")
@@ -224,24 +274,39 @@ class Event(object):
 
     @property
     def correlation_id(self):  # type: () -> Optional[str]
+        """The event's correlation id, if it has one."""
         return self.raw.get("correlation_id")
 
     @property
     def is_task(self):  # type: () -> bool
+        """Whether this is a ``task.*`` lifecycle event."""
         return self.kind == "task"
 
     def __repr__(self):  # type: () -> str
+        """Short representation with id, name and topic."""
         return "Event(id=%r, event=%r, topic=%r)" % (self.id, self.event, self.topic)
 
     def __getitem__(self, key):  # type: (str) -> Any
+        """Read any field of the raw event dict, e.g. ``event["severity"]``."""
         return self.raw[key]
 
 
 class PublishResult(object):
+    """What the server accepted for a publish call.
+
+    Attributes:
+        accepted: Number of events accepted (duplicates included).
+        deduplicated: How many were duplicates of an earlier idempotency key.
+        events: ``[{"id", "event", "topic", "deduplicated"}, ...]``.
+        rejected: Events the server refused, with reasons (batch publishes).
+        raw: The full response body.
+    """
+
     __slots__ = ("accepted", "deduplicated", "events", "rejected", "raw")
 
     def __init__(self, payload):
         # type: (Dict[str, Any]) -> None
+        """Parse the publish response body."""
         self.raw = payload
         self.accepted = payload.get("accepted", 0)
         self.deduplicated = payload.get("deduplicated", 0)
@@ -250,13 +315,16 @@ class PublishResult(object):
 
     @property
     def id(self):  # type: () -> Optional[str]
+        """Id of the first accepted event (convenient for single publishes)."""
         return self.events[0]["id"] if self.events else None
 
     @property
     def ids(self):  # type: () -> List[str]
+        """Ids of every accepted event, in request order."""
         return [e["id"] for e in self.events]
 
     def __repr__(self):  # type: () -> str
+        """Short representation with the accepted and deduplicated counts."""
         return "PublishResult(accepted=%s, deduplicated=%s)" % (self.accepted, self.deduplicated)
 
 
@@ -265,6 +333,7 @@ class Page(object):
 
     def __init__(self, client, path, params, payload):
         # type: (Any, str, Dict[str, Any], Dict[str, Any]) -> None
+        """Hold one page of history plus what is needed to fetch the next."""
         self._client = client
         self._path = path
         self._params = params
@@ -274,12 +343,15 @@ class Page(object):
         self.has_more = bool(page.get("has_more"))
 
     def __iter__(self):  # type: () -> Iterator[Event]
+        """Iterate the events on this page."""
         return iter(self.events)
 
     def __len__(self):  # type: () -> int
+        """Number of events on this page."""
         return len(self.events)
 
     def next(self):  # type: () -> Optional["Page"]
+        """Fetch the following page, or ``None`` when this is the last one."""
         if not self.has_more:
             return None
         params = dict(self._params)
@@ -287,6 +359,7 @@ class Page(object):
         return self._client._history_page(self._path, params)
 
     def autopage(self):  # type: () -> Iterator[Event]
+        """Iterate every event across this and all following pages."""
         page = self  # type: Optional[Page]
         while page is not None:
             for event in page.events:
@@ -300,8 +373,11 @@ class Page(object):
 
 
 class _Config(object):
+    """Connection settings shared by :class:`Beacn` and :class:`AsyncBeacn`."""
+
     def __init__(self, url, api_key, timeout, retry, user_agent, default_topic,
                  default_source, environment):
+        """Store settings, defaulting the retry policy and user agent."""
         self.base_url = url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
@@ -313,9 +389,11 @@ class _Config(object):
 
     @property
     def is_ws(self):
+        """Whether the configured URL uses ``ws://``/``wss://``."""
         return self.base_url.startswith("ws://") or self.base_url.startswith("wss://")
 
     def http_base(self):
+        """The base URL as ``http(s)://`` (converting a ``ws(s)://`` URL)."""
         b = self.base_url
         if b.startswith("wss://"):
             return "https://" + b[6:]
@@ -324,6 +402,7 @@ class _Config(object):
         return b
 
     def ws_base(self):
+        """The base URL as ``ws(s)://`` (converting an ``http(s)://`` URL)."""
         b = self.base_url
         if b.startswith("https://"):
             return "wss://" + b[8:]
@@ -334,6 +413,7 @@ class _Config(object):
 
 def _build_body(event, topic, data, kw):
     # type: (str, Optional[str], Optional[Dict[str, Any]], Dict[str, Any]) -> Dict[str, Any]
+    """The JSON body for one event: ``event``, ``topic``, ``data`` and any extra envelope fields."""
     body = {"event": event}
     if topic:
         body["topic"] = topic
@@ -353,6 +433,21 @@ def _build_body(event, topic, data, kw):
 
 
 class Beacn(object):
+    """Synchronous BEACN client (standard library only).
+
+    Args:
+        url: BEACN base URL, e.g. ``https://beacn.internal``.
+        api_key: A ``bk_…`` key. Its scopes decide what the client may do.
+        timeout: Per-request timeout in seconds.
+        retry: A :class:`RetryPolicy`; the default retries idempotent calls.
+        user_agent: Override the ``User-Agent`` header.
+        default_topic: Topic used when ``publish`` is called without one.
+        default_source: ``source`` stamped on events that do not set one.
+        environment: Informational; the key decides the environment server-side.
+
+    Use as a context manager or call :meth:`close` when done.
+    """
+
     def __init__(
         self,
         url,
@@ -365,6 +460,11 @@ class Beacn(object):
         environment=None,
     ):
         # type: (str, str, float, Optional[RetryPolicy], Optional[str], Optional[str], Optional[str], Optional[str]) -> None
+        """Validate the key and prepare the HTTP opener.
+
+        Raises:
+            BeacnError: ``api_key`` is empty.
+        """
         if not api_key:
             raise BeacnError("api_key is required")
         self._cfg = _Config(url, api_key, timeout, retry, user_agent,
@@ -375,6 +475,11 @@ class Beacn(object):
 
     def _request(self, method, path, body=None, params=None, idempotent=None):
         # type: (str, str, Any, Optional[Dict[str, Any]], Optional[bool]) -> Any
+        """Send one API request with retries and return the decoded JSON body.
+
+        Raises:
+            APIError: The final attempt failed (see the subclasses for which kind).
+        """
         url = self._cfg.http_base() + path
         if params:
             url = url + "?" + urllib.parse.urlencode(
@@ -437,6 +542,18 @@ class Beacn(object):
 
     def publish(self, event, topic=None, data=None, **kw):
         # type: (str, Optional[str], Optional[Dict[str, Any]], Any) -> PublishResult
+        """Publish one event.
+
+        Args:
+            event: Event name, e.g. ``"payment.completed"``.
+            topic: Topic; defaults to ``default_topic``.
+            data: JSON-serialisable payload.
+            **kw: Other envelope fields: ``idempotency_key``, ``correlation_id``,
+                ``severity``, ``source``, ``user_id``, ``occurred_at`` and so on.
+
+        Returns:
+            A :class:`PublishResult`.
+        """
         body = _build_body(event, topic or self._cfg.default_topic, data, kw)
         if "source" not in body and self._cfg.default_source:
             body["source"] = self._cfg.default_source
@@ -444,6 +561,11 @@ class Beacn(object):
 
     def publish_batch(self, events, idempotency_key=None):
         # type: (Sequence[Dict[str, Any]], Optional[str]) -> PublishResult
+        """Publish several events in one request.
+
+        With ``idempotency_key`` each event without its own key gets
+        ``"<key>:<index>"``, so retrying the whole batch is safe.
+        """
         items = []
         for e in events:
             item = dict(e)
@@ -462,6 +584,7 @@ class Beacn(object):
                 severity=None, correlation_id=None, since=None, until=None,
                 order="desc", limit=50, cursor=None):
         # type: (...) -> Page
+        """Query stored events (newest first by default); returns the first :class:`Page`."""
         params = {
             "topic": topic, "event": event, "event_prefix": event_prefix,
             "kind": kind, "severity": severity, "correlation_id": correlation_id,
@@ -470,21 +593,31 @@ class Beacn(object):
         return self._history_page("/api/v1/events", params)
 
     def _history_page(self, path, params):
+        """Fetch one history page for the given parameters."""
         payload = self._request("GET", path, params=params)
         return Page(self, path, params, payload)
 
     def get_event(self, event_id):
         # type: (str) -> Event
+        """Fetch one event by id.
+
+        Raises:
+            NotFound: No such event in this key's environment.
+        """
         return Event(self._request("GET", "/api/v1/events/" + event_id)["event"])
 
     def iter_events(self, **kw):
         # type: (Any) -> Iterator[Event]
+        """Iterate every matching event across pages (same filters as :meth:`history`)."""
         return self.history(**kw).autopage()
 
     # -- replay --------------------------------------------------
 
     def replay(self, topic, since=None, limit=None):
         # type: (str, Optional[str], Optional[int]) -> Dict[str, Any]
+        """Stored events on ``topic`` after the event id ``since`` (the server's replay response
+        dict).
+        """
         body = {"topic": topic}
         if since is not None:
             body["since"] = since
@@ -529,6 +662,7 @@ class Beacn(object):
                     pass
 
     def _sse_once(self, topics, token, last_id):
+        """Open one SSE request for ``topics`` (resuming after ``last_id`` when given)."""
         params = {"token": token, "topics": ",".join(topics)}
         url = self._cfg.http_base() + "/api/v1/sse?" + urllib.parse.urlencode(params)
         req = urllib.request.Request(url)
@@ -542,6 +676,7 @@ class Beacn(object):
 
     def _realtime_token(self, topics):
         # type: (Iterable[str]) -> str
+        """Mint a realtime token covering ``topics`` with this client's API key."""
         body = {"topic_patterns": list(topics)}
         out = self._request("POST", "/api/v1/realtime/tokens", body=body, idempotent=True)
         return out["token"]
@@ -549,15 +684,19 @@ class Beacn(object):
     # -- misc ------------------------------------------------
 
     def whoami(self):  # type: () -> Dict[str, Any]
+        """The producer, environment and scopes behind the API key."""
         return self._request("GET", "/api/v1/whoami")
 
     def close(self):  # type: () -> None
+        """Release resources (nothing to release for the stdlib client; kept for symmetry)."""
         pass
 
     def __enter__(self):  # type: () -> "Beacn"
+        """Use the client as a context manager."""
         return self
 
     def __exit__(self, *exc):  # type: (Any) -> None
+        """Close the client on leaving the ``with`` block."""
         self.close()
 
 
@@ -567,6 +706,12 @@ class Beacn(object):
 
 
 class AsyncBeacn(object):
+    """Asynchronous BEACN client (needs ``httpx``; WebSocket subscribe needs ``websockets``).
+
+    Takes the same arguments as :class:`Beacn`. Use ``async with`` or call
+    :meth:`aclose` to close the underlying HTTP connection pool.
+    """
+
     def __init__(
         self,
         url,
@@ -578,6 +723,11 @@ class AsyncBeacn(object):
         default_source=None,
         environment=None,
     ):
+        """Validate the key; the HTTP client is created lazily on first request.
+
+        Raises:
+            BeacnError: ``api_key`` is empty.
+        """
         if not api_key:
             raise BeacnError("api_key is required")
         self._cfg = _Config(url, api_key, timeout, retry, user_agent,
@@ -585,6 +735,11 @@ class AsyncBeacn(object):
         self._client = None
 
     def _http(self):
+        """The shared ``httpx.AsyncClient``, created on first use.
+
+        Raises:
+            BeacnError: ``httpx`` is not installed (``pip install "beacn[async]"``).
+        """
         if self._client is None:
             try:
                 import httpx
@@ -603,6 +758,7 @@ class AsyncBeacn(object):
         return self._client
 
     async def _request(self, method, path, body=None, params=None, idempotent=None):
+        """Async version of :meth:`Beacn._request` (same retry rules)."""
         import asyncio
 
         client = self._http()
@@ -643,12 +799,14 @@ class AsyncBeacn(object):
             return _decode(resp.content, resp.headers.get("content-type"))
 
     async def publish(self, event, topic=None, data=None, **kw):
+        """Publish one event; see :meth:`Beacn.publish`."""
         body = _build_body(event, topic or self._cfg.default_topic, data, kw)
         if "source" not in body and self._cfg.default_source:
             body["source"] = self._cfg.default_source
         return PublishResult(await self._request("POST", "/api/v1/events", body=body))
 
     async def publish_batch(self, events, idempotency_key=None):
+        """Publish several events; see :meth:`Beacn.publish_batch`."""
         items = [dict(e) for e in events]
         body = {"events": items}
         if idempotency_key:
@@ -657,6 +815,7 @@ class AsyncBeacn(object):
         return PublishResult(await self._request("POST", "/api/v1/events", body=body))
 
     async def history(self, **kw):
+        """Query stored events; returns the response dict (``events`` and ``page``)."""
         params = {k: kw.get(k) for k in (
             "topic", "event", "event_prefix", "kind", "severity", "correlation_id",
             "since", "until", "order", "limit", "cursor")}
@@ -666,10 +825,12 @@ class AsyncBeacn(object):
         return [Event(e) for e in payload.get("events", [])], payload.get("page", {})
 
     async def get_event(self, event_id):
+        """Fetch one event by id."""
         out = await self._request("GET", "/api/v1/events/" + event_id)
         return Event(out["event"])
 
     async def replay(self, topic, since=None, limit=None):
+        """Stored events on ``topic`` after ``since``; see :meth:`Beacn.replay`."""
         body = {"topic": topic}
         if since is not None:
             body["since"] = since
@@ -678,9 +839,11 @@ class AsyncBeacn(object):
         return await self._request("POST", "/api/v1/events/replay", body=body, idempotent=True)
 
     async def whoami(self):
+        """The producer, environment and scopes behind the API key."""
         return await self._request("GET", "/api/v1/whoami")
 
     async def _realtime_token(self, topics):
+        """Mint a realtime token covering ``topics``."""
         out = await self._request(
             "POST", "/api/v1/realtime/tokens", body={"topic_patterns": list(topics)},
             idempotent=True,
@@ -737,14 +900,17 @@ class AsyncBeacn(object):
                 await asyncio.sleep(next(backoff))
 
     async def aclose(self):
+        """Close the HTTP connection pool."""
         if self._client is not None:
             await self._client.aclose()
             self._client = None
 
     async def __aenter__(self):
+        """Use the client as an async context manager."""
         return self
 
     async def __aexit__(self, *exc):
+        """Close the client on leaving the ``async with`` block."""
         await self.aclose()
 
 
@@ -754,12 +920,14 @@ class AsyncBeacn(object):
 
 
 def _clean(params):
+    """Drop ``None`` values from query parameters (``None`` if nothing is left)."""
     if not params:
         return None
     return {k: v for k, v in params.items() if v is not None}
 
 
 def _decode(raw, content_type):
+    """Decode a response body: JSON normally, text for ``text/plain``, ``{}`` when empty."""
     if not raw:
         return {}
     if content_type and "json" not in content_type and "text/plain" in content_type:
@@ -768,6 +936,7 @@ def _decode(raw, content_type):
 
 
 def _decode_safe(raw):
+    """Decode JSON, returning ``{}`` for anything unparsable."""
     try:
         return json.loads(raw.decode("utf-8"))
     except (ValueError, AttributeError):
@@ -797,6 +966,7 @@ def _iter_sse(resp):
 
 async def _ws_iter(ws, heartbeat):
     # type: (Any, bool) -> AsyncIterator[str]
+    """Yield raw WebSocket messages, answering server heartbeats when ``heartbeat`` is on."""
     import asyncio
 
     if not heartbeat:

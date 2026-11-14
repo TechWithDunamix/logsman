@@ -1,6 +1,6 @@
 # Configuration
 
-Settings are defined in `app/config.py`. All use the `LOGSMAN_` prefix and are
+Settings are defined in `src/logsman/core/config.py`. All use the `LOGSMAN_` prefix and are
 loaded from the process environment and the `.env` file in the working directory.
 The application explicitly constructs `AppConfig(_env_file=".env")`.
 Never commit `.env` or API keys.
@@ -10,8 +10,8 @@ Never commit `.env` or API keys.
 | `LOGSMAN_APP_NAME` | `Logsman` | Application/OpenAPI title |
 | `LOGSMAN_APP_ENV` | `local` | `local`, `testing`, `staging` or `production` label |
 | `LOGSMAN_DEBUG` | `true` | Sillo debug mode; turn off for production |
-| `LOGSMAN_HOST` | `127.0.0.1` | Bind address when running `python -m app.main` |
-| `LOGSMAN_PORT` | `8010` | Port when running `python -m app.main` |
+| `LOGSMAN_HOST` | `127.0.0.1` | Bind address for `logsman` / `python -m logsman` |
+| `LOGSMAN_PORT` | `8010` | Port for `logsman` / `python -m logsman` |
 | `LOGSMAN_MONGODB_URL` | `mongodb://localhost:27017` | MongoDB connection URI |
 | `LOGSMAN_MONGODB_DATABASE` | `logsman` | Database name |
 | `LOGSMAN_MONGODB_COLLECTION` | `events` | Collection name |

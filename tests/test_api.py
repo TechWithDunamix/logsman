@@ -1,6 +1,8 @@
+"""HTTP API: listing, filtering, lookup, validation and the OpenAPI document."""
+
 from __future__ import annotations
 
-from app.models import EventModel
+from logsman.events.schema import EventModel
 
 
 async def _seed(store) -> None:

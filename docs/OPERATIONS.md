@@ -2,9 +2,11 @@
 
 ## Production deployment
 
-Build and run the supplied Docker image, or install with `uv sync --frozen` and
-run `uv run uvicorn app.main:app --host 127.0.0.1 --port 8010` under your process
-supervisor. Configure a persistent, access-controlled MongoDB deployment and a
+Build and run the supplied Docker image, or install with
+`pip install -r requirements.txt` and run
+`uvicorn logsman.main:app --host 127.0.0.1 --port 8010` under your process
+supervisor (`deploy/systemd/logsman.service`; the README's *Production without
+Docker* section walks through it). Configure a persistent, access-controlled MongoDB deployment and a
 BEACN consumer key. Set `LOGSMAN_DEBUG=false` explicitly. Use a TLS/authenticating
 reverse proxy for remote API users: the application itself does not authenticate
 reads. Avoid publishing an unauthenticated database or log archive publicly.
@@ -87,7 +89,7 @@ suppress republished events inside its deduplication window.
 
 ## Change the vendored SDK
 
-`app/vendor/beacn.py` is part of this service's source and image. Installing a
+`src/logsman/vendor/beacn.py` is part of this service's source and image. Installing a
 new external `beacn` package does not replace it. Review and copy an intended SDK
 revision, run the service tests, and test its stream behavior against the BEACN
 server version being deployed before rolling out.

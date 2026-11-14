@@ -19,23 +19,32 @@ dev = [
     "httpx>=0.28,<1",
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "ruff>=0.6",
 ]
 
+[project.scripts]
+logsman = "logsman.__main__:main"
+
 [tool.hatch.build.targets.wheel]
-packages = ["app", "routes"]
+packages = ["src/logsman"]
+
+[tool.sillo]
+app = "logsman.main:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 addopts = "-q"
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["app/vendor"]
+src = ["src", "tests"]
+extend-exclude = ["src/logsman/vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
-"routes/*.py" = ["B008"]
+"src/logsman/api/*.py" = ["B008"]

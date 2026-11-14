@@ -1,0 +1,46 @@
+# Logsman as a systemd service (production without Docker).
+#
+# Assumes the layout described in README.md → "Production without Docker":
+#   code       /opt/logsman            (owned by root, readable by logsman)
+#   virtualenv /opt/logsman/.venv      (pip install -r requirements.txt)
+#   settings   /etc/logsman/logsman.env (mode 0640, root:logsman)
+#
+# Install:
+#   sudo cp deploy/systemd/logsman.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now logsman
+#   journalctl -u logsman -f
+
+[Unit]
+Description=Logsman — BEACN log archive
+Documentation=file:///opt/logsman/README.md
+After=network-online.target mongod.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=logsman
+Group=logsman
+WorkingDirectory=/opt/logsman
+EnvironmentFile=/etc/logsman/logsman.env
+# One worker: the BEACN consumer runs inside the web process, so every extra
+# worker would open another subscription and write every log again (harmless,
+# writes are idempotent, but wasted work). Scale reads with a second instance
+# that sets LOGSMAN_BEACN_ENABLED=false instead.
+ExecStart=/opt/logsman/.venv/bin/uvicorn logsman.main:app \
+    --host 127.0.0.1 --port 8010 --proxy-headers --forwarded-allow-ips 127.0.0.1 \
+    --no-access-log
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the service only needs the network.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

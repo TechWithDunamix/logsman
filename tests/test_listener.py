@@ -1,9 +1,11 @@
+"""The consumer persists valid BEACN payloads and discards invalid ones."""
+
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 
-from app.listener import BeacnLogListener
+from logsman.consumer.listener import BeacnLogListener
 
 
 def _envelope(data):
